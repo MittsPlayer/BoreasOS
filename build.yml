@@ -1,0 +1,57 @@
+name: Build BoreasOS ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ISO in Arch container
+        run: |
+          docker run --rm --privileged -v "$PWD":/work -w /work archlinux:latest bash build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoreasOS-ISO
+          path: out/*.iso
+          if-no-files-found: error
+          retention-days: 7
+
+      # Os passos abaixo so rodam quando voce clica em "Run workflow"
+      - name: Preparar arquivos da release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir release
+          ISO="$(ls out/*.iso | head -n1)"
+          NAME="$(basename "$ISO")"
+          sha256sum "$ISO" | sed "s|out/||" > "release/$NAME.sha256"
+          if [ "$(stat -c%s "$ISO")" -gt 2000000000 ]; then
+            split -b 1900M -d "$ISO" "release/$NAME.part"
+          else
+            cp "$ISO" "release/$NAME"
+          fi
+          ls -la release
+
+      - name: Publicar release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: BoreasOS v${{ github.run_number }}
+          body: |
+            ISO do BoreasOS (modo live, 64-bit).
+
+            Se o arquivo vier em partes (.part00, .part01...), junte antes de usar:
+            - Linux/Mac: `cat boreasos-*.iso.part* > boreasos.iso`
+            - Windows (cmd): `copy /b boreasos-*.iso.part00+boreasos-*.iso.part01 boreasos.iso`
+
+            Confira a integridade com o arquivo .sha256.
+          files: release/*
